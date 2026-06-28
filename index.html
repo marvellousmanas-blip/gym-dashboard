@@ -85,7 +85,8 @@
   .row{display:flex;gap:8px 14px;flex-wrap:wrap;align-items:center}
   .legend{margin-bottom:12px}
   .key{display:inline-flex;align-items:center;gap:7px;font-size:.78rem;color:var(--soft);cursor:pointer;
-    border:1px solid var(--rule);border-radius:999px;padding:4px 10px;user-select:none}
+    border:1px solid var(--rule);border-radius:999px;padding:4px 10px;user-select:none;
+    appearance:none;background:transparent;font-family:inherit}
   .key .sw{width:10px;height:10px;border-radius:3px}
   .seg{display:inline-flex;border:1px solid var(--rule);border-radius:9px;overflow:hidden;margin-left:auto}
   .seg button{border:0;background:transparent;color:var(--soft);font:inherit;font-weight:600;font-size:.74rem;
@@ -195,18 +196,24 @@
 const D=window.GYM_DATA, DAYS=['push','pull','legs'];
 const css=k=>getComputedStyle(document.documentElement).getPropertyValue(k).trim();
 const DC=()=>({push:css('--push'),pull:css('--pull'),legs:css('--legs')});
+// escape any data-derived string before it enters innerHTML (OCR'd names/variations)
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// parse a YYYY-MM-DD date as local midnight (timezone-safe for week bucketing)
+const parseD=s=>{const[y,m,d]=String(s).split('-').map(Number);return new Date(y,m-1,d).getTime();};
 
 // flatten
 const sets=[];
 D.blocks.forEach(b=>DAYS.forEach(day=>{const ds=b.days[day];if(!ds)return;
   ds.exercises.forEach(e=>e.sessions.forEach(s=>s.sets.forEach(st=>sets.push({
     block:b.block,day,exercise:e.name,canon:e.canonical||e.name,load:e.load_type||'kg',
-    date:s.date_iso,t:Date.parse(s.date_iso),weight:st.weight,reps:st.reps,
+    date:s.date_iso,t:parseD(s.date_iso),weight:st.weight,reps:st.reps,
     pr:!!st.pr,voided:!!st.voided,variation:s.variation||''}))));
 }));
 const V=sets.filter(s=>!s.voided);
 const dates=[...new Set(V.map(s=>s.date))].sort();
-const minT=Date.parse(dates[0]), maxT=Date.parse(dates.at(-1)), DAY=864e5;
+const minT=parseD(dates[0]), maxT=parseD(dates.at(-1)), DAY=864e5;
+const blockIds=[...new Set(V.map(s=>s.block))].sort((a,b)=>a-b);
+const roman=n=>['','I','II','III','IV','V','VI','VII','VIII'][n]||('#'+n);
 const fmt=t=>{const d=new Date(t);return d.getDate()+'/'+(d.getMonth()+1)};
 const fmtL=t=>new Date(t).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
 const xT=t=>(t-minT)/DAY;
@@ -224,8 +231,8 @@ const dlFirst=dl.length?Math.max(...dl.filter(s=>s.date===dl[0].date).map(s=>s.w
 const dlMax=dl.length?Math.max(...dl.map(s=>s.weight)):0;
 
 document.getElementById('dek').textContent=
-  `${fmtL(minT)} – ${fmtL(maxT)} · ${weeksSpan} weeks of training, two blocks, hand-logged set by set and digitized here.`;
-document.getElementById('ledger-span').textContent=`${fmt(minT)} → ${fmt(maxT)} · 2026`;
+  `${fmtL(minT)} – ${fmtL(maxT)} · ${weeksSpan} weeks of training, ${blockIds.length} block${blockIds.length===1?'':'s'}, hand-logged set by set and digitized here.`;
+document.getElementById('ledger-span').textContent=`${fmt(minT)} → ${fmt(maxT)} · ${new Date(maxT).getFullYear()}`;
 const fields=[
   {k:'Sessions',v:workouts,s:`${tDays} training days`},
   {k:'Sets',v:V.length,s:`${reps.toLocaleString()} reps`},
@@ -252,23 +259,24 @@ const dcount=d=>new Set(V.filter(s=>s.day===d).map(s=>s.date)).size;
 
 // layoff = biggest gap between training days
 let gap={a:0,b:0,len:0};
-for(let i=1;i<dates.length;i++){const g=(Date.parse(dates[i])-Date.parse(dates[i-1]))/DAY;
-  if(g>gap.len)gap={a:Date.parse(dates[i-1]),b:Date.parse(dates[i]),len:g};}
+for(let i=1;i<dates.length;i++){const g=(parseD(dates[i])-parseD(dates[i-1]))/DAY;
+  if(g>gap.len)gap={a:parseD(dates[i-1]),b:parseD(dates[i]),len:g};}
 
 // key lifts
 const LIFTS=[
   {k:'Deadlift',c:'--push',f:s=>s.exercise==='Deadlift'},
   {k:'Squat',c:'--pull',f:s=>s.canon==='Squat'},
   {k:'RDL',c:'--legs',f:s=>s.exercise==='RDL'},
-  {k:'Bench',c:'--pr',f:s=>s.exercise==='Chest Press'&&/Flat|Free/i.test(s.variation)},
+  {k:'Bench',c:'--pr',f:s=>s.exercise==='Chest Press'&&/Flat|Free/i.test(s.variation)&&!/incl/i.test(s.variation)},
   {k:'Shoulder Press',c:'--accent',f:s=>s.exercise==='Shoulder Press'&&s.weight!=null},
 ];
+const STRDASH=[[],[7,4],[2,3],[9,3,2,3],[1,3]];  // non-color channel per lift
 let strMode='top';
 function lineFor(filter,mode){const m={};
   V.filter(s=>filter(s)&&s.weight!=null&&(mode==='top'||s.reps!=null)).forEach(s=>{
     const v=mode==='top'?s.weight:e1rm(s.weight,s.reps);
     if(!(s.date in m)||v>m[s.date].v)m[s.date]={v,pr:s.pr};});
-  return Object.keys(m).sort().map(d=>({x:xT(Date.parse(d)),y:Math.round(m[d].v*10)/10,pr:m[d].pr}));}
+  return Object.keys(m).sort().map(d=>({x:xT(parseD(d)),y:Math.round(m[d].v*10)/10,pr:m[d].pr}));}
 
 // ---- chart plumbing (rebuild on theme change) ----
 const CH={};
@@ -300,8 +308,8 @@ function renderAll(){
       y:{stacked:true,beginAtZero:true,...gridP(),ticks:{...gridP().ticks,precision:0}}},
       plugins:{tooltip:{callbacks:{title:i=>'Week of '+i[0].label}}}}});
   // 02 strength
-  const ds=LIFTS.map(L=>{const pts=lineFor(L.f,strMode);const col=css(L.c);
-    return {label:L.k,data:pts,borderColor:col,tension:.25,spanGaps:true,borderWidth:2,
+  const ds=LIFTS.map((L,i)=>{const pts=lineFor(L.f,strMode);const col=css(L.c);
+    return {label:L.k,data:pts,borderColor:col,borderDash:STRDASH[i%STRDASH.length],tension:.25,spanGaps:true,borderWidth:2,
       pointRadius:pts.map(p=>p.pr?5:2.5),pointBackgroundColor:pts.map(p=>p.pr?css('--pr'):col),
       pointBorderColor:pts.map(p=>p.pr?css('--pr'):col),pointStyle:pts.map(p=>p.pr?'rectRot':'circle')};
   }).filter(d=>d.data.length);
@@ -312,10 +320,10 @@ function renderAll(){
       plugins:{tooltip:{callbacks:{title:i=>fmtL(minT+i[0].parsed.x*DAY),
         label:c=>c.dataset.label+': '+c.parsed.y+' kg'+(c.raw.pr?'  ★ PR':'')}}}}});
   document.getElementById('str-legend').innerHTML=LIFTS.filter(L=>lineFor(L.f,'top').length).map(L=>
-    `<span class="key" data-k="${L.k}"><span class="sw" style="background:${css(L.c)}"></span>${L.k}</span>`).join('');
+    `<button type="button" class="key" aria-pressed="true" data-k="${esc(L.k)}"><span class="sw" style="background:${css(L.c)}"></span>${esc(L.k)}</button>`).join('');
   document.querySelectorAll('#str-legend .key').forEach(p=>p.onclick=()=>{
     const i=CH.str.data.datasets.findIndex(d=>d.label===p.dataset.k);const m=CH.str.getDatasetMeta(i);
-    m.hidden=!m.hidden;p.style.opacity=m.hidden?.45:1;CH.str.update();});
+    m.hidden=!m.hidden;p.setAttribute('aria-pressed',String(!m.hidden));p.style.opacity=m.hidden?.45:1;CH.str.update();});
   // 03 volume
   CH.vol=new Chart(volChart,{type:'bar',data:{labels:wLab,
     datasets:[{data:volWk.map(v=>Math.round(v)),backgroundColor:css('--accent'),borderRadius:2}]},
@@ -330,39 +338,45 @@ document.getElementById('freq-legend').innerHTML=DAYS.map(d=>
   `<span class="key"><span class="sw" style="background:${css('--'+d)}"></span>${d}</span>`).join('');
 document.getElementById('freq-mini').innerHTML=DAYS.map(d=>
   `<div><div class="n num" style="color:${css('--'+d)}">${dcount(d)}</div><div class="l">${d} days</div></div>`).join('')+
-  `<div><div class="n num">${(workouts/activeWk).toFixed(1)}</div><div class="l">per active week</div></div>`;
+  `<div><div class="n num">${activeWk?(workouts/activeWk).toFixed(1):'—'}</div><div class="l">per active week</div></div>`;
 
-// 04 block comparison
+// 04 block comparison (derived over however many blocks exist)
 function blockStat(bn){const r=V.filter(s=>s.block===bn);
   const wk=new Set(r.map(s=>s.date+'|'+s.day)).size;
   const vl=r.filter(s=>s.load==='kg'&&s.weight&&s.reps).reduce((a,s)=>a+s.weight*s.reps,0);
-  const dts=[...new Set(r.map(s=>s.date))];const wks=new Set(dts.map(d=>monday(Date.parse(d)))).size;
-  return {wk,vl,pr:r.filter(s=>s.pr).length,perWk:wk/wks};}
-const B1=blockStat(1), B2=blockStat(2);
+  const wks=new Set([...new Set(r.map(s=>s.date))].map(d=>monday(parseD(d)))).size;
+  return {wk,vl,pr:r.filter(s=>s.pr).length,perWk:wks?wk/wks:0};}
+const BS=blockIds.map(blockStat);
+const bcol=i=>i%2?'var(--accent)':'var(--push)';
 document.getElementById('block-mini').innerHTML=[
-  ['Sessions',B1.wk,B2.wk,0],['Tonnage',Math.round(B1.vl/1000)+'t',Math.round(B2.vl/1000)+'t',0],
-  ['Freq/wk',B1.perWk.toFixed(1),B2.perWk.toFixed(1),0],['PRs',B1.pr,B2.pr,0],
-].map(x=>`<div><div class="l">${x[0]}</div><div class="n" style="font-size:.92rem;margin-top:3px">
-  <span style="color:var(--push)">I ${x[1]}</span> &nbsp;<span style="color:var(--accent)">II ${x[2]}</span></div></div>`).join('');
+  ['Sessions',BS.map(s=>s.wk)],
+  ['Tonnage',BS.map(s=>Math.round(s.vl/1000)+'t')],
+  ['Freq/wk',BS.map(s=>s.perWk.toFixed(1))],
+  ['PRs',BS.map(s=>s.pr)],
+].map(([label,vals])=>`<div><div class="l">${label}</div><div class="n" style="font-size:.92rem;margin-top:3px">${
+  vals.map((v,i)=>`<span style="color:${bcol(i)}">${roman(blockIds[i])} ${v}</span>`).join(' &nbsp;')}</div></div>`).join('');
 function best(bn,filter,mode){const r=V.filter(s=>s.block===bn&&filter(s)&&s.weight!=null&&(mode==='top'||s.reps!=null));
   if(!r.length)return null;return Math.round(Math.max(...r.map(s=>mode==='top'?s.weight:e1rm(s.weight,s.reps)))*10)/10;}
-let crows=`<thead><tr><th>Lift</th><th>Block I top</th><th>Block II top</th><th>Δ</th><th>Best 1RM</th></tr></thead><tbody>`;
-LIFTS.forEach(L=>{const t1=best(1,L.f,'top'),t2=best(2,L.f,'top');
-  const r1=best(1,L.f,'e1rm'),r2=best(2,L.f,'e1rm');const bestR=Math.max(r1||0,r2||0);
-  let d='—',cl='flat';if(t1&&t2){const dd=Math.round((t2-t1)*10)/10;d=(dd>0?'+':'')+dd+'kg';cl=dd>0?'up':dd<0?'down':'flat';}
-  crows+=`<tr><td>${L.k}</td><td>${t1?t1+'kg':'—'}</td><td>${t2?t2+'kg':'—'}</td>
-    <td class="delta ${cl}">${d}</td><td>${bestR?bestR+'kg':'—'}</td></tr>`;});
+let crows=`<thead><tr><th>Lift</th>${blockIds.map(b=>`<th>Block ${roman(b)} top</th>`).join('')}<th>Δ</th><th>Best 1RM</th></tr></thead><tbody>`;
+LIFTS.forEach(L=>{
+  const tops=blockIds.map(b=>best(b,L.f,'top'));
+  const e1=blockIds.map(b=>best(b,L.f,'e1rm')).filter(x=>x!=null);
+  const bestR=e1.length?Math.max(...e1):0;
+  const seen=tops.filter(x=>x!=null);
+  let d='—',cl='flat';
+  if(seen.length>=2){const dd=Math.round((seen[seen.length-1]-seen[0])*10)/10;d=(dd>0?'+':'')+dd+'kg';cl=dd>0?'up':dd<0?'down':'flat';}
+  crows+=`<tr><td>${esc(L.k)}</td>${tops.map(t=>`<td>${t!=null?t+'kg':'—'}</td>`).join('')}<td class="delta ${cl}">${d}</td><td>${bestR?bestR+'kg':'—'}</td></tr>`;});
 document.getElementById('compare').innerHTML=crows+'</tbody>';
 
 // 05 explorer
 const canon=[...new Set(V.map(s=>s.canon))].sort();
 const sel=document.getElementById('exSelect');
-sel.innerHTML=canon.map(c=>`<option>${c}</option>`).join('');
+sel.innerHTML=canon.map(c=>`<option>${esc(c)}</option>`).join('');
 function drawEx(name,rebuild){const rows=V.filter(s=>s.canon===name);const load=rows[0].load;
   const useReps=load==='band';const unit=load==='band'?'reps (assisted)':load==='machine_level'?'machine level':'kg';
   document.getElementById('exUnit').textContent=load==='band'?'band-assisted · best reps':load==='machine_level'?'machine levels':'kg · top set';
   const m={};rows.forEach(s=>{const v=useReps?s.reps:s.weight;if(v==null)return;if(!(s.date in m)||v>m[s.date].v)m[s.date]={v,pr:s.pr};});
-  const pts=Object.keys(m).sort().map(d=>({x:xT(Date.parse(d)),y:m[d].v,pr:m[d].pr}));
+  const pts=Object.keys(m).sort().map(d=>({x:xT(parseD(d)),y:m[d].v,pr:m[d].pr}));
   const col=css('--accent');
   const data={datasets:[{label:name,data:pts,borderColor:col,tension:.25,spanGaps:true,borderWidth:2,
     pointRadius:pts.map(p=>p.pr?5:2.5),pointBackgroundColor:pts.map(p=>p.pr?css('--pr'):col),
@@ -375,7 +389,7 @@ function drawEx(name,rebuild){const rows=V.filter(s=>s.canon===name);const load=
   else{if(CH.ex)CH.ex.destroy();CH.ex=new Chart(exChart,{type:'line',data,options:opts});}
   const sess=new Set(rows.map(s=>s.date)).size;
   const bestS=rows.reduce((a,s)=>{const v=useReps?s.reps:s.weight;return v!=null&&v>(a.v??-1)?{v,s}:a;},{}).s;
-  const bt=bestS?(useReps?bestS.reps+' reps':bestS.weight+' kg'+(bestS.reps?' × '+bestS.reps:'')):'—';
+  const bt=bestS?(useReps?bestS.reps+' reps':(load==='machine_level'?'lvl '+bestS.weight:bestS.weight+' kg')+(bestS.reps?' × '+bestS.reps:'')):'—';
   document.getElementById('exMini').innerHTML=
     `<div><div class="n num">${sess}</div><div class="l">sessions</div></div>
      <div><div class="n num">${rows.length}</div><div class="l">sets</div></div>
@@ -385,14 +399,16 @@ sel.onchange=()=>drawEx(sel.value,false);
 
 // 06 PR board
 const prs=V.filter(s=>s.pr).sort((a,b)=>b.t-a.t);
-document.getElementById('pr-count').textContent=`${prs.length} personal records across the two blocks.`;
-document.getElementById('prboard').innerHTML=prs.map(s=>{
-  const v=s.weight!=null?(s.weight+' kg'+(s.reps!=null?' × '+s.reps:'')):(s.reps!=null?s.reps+' reps':'★');
-  return `<div class="prcard"><div class="ex">${s.exercise}</div><div class="v num">${v}</div>
-    <div class="m">${fmtL(s.t)} · ${s.day}${s.variation?' · '+s.variation:''}</div></div>`;}).join('');
+const fmtVal=s=>s.load==='band'?(s.reps!=null?s.reps+' reps':'★')
+  :s.load==='machine_level'?'lvl '+(s.weight!=null?s.weight:'?')+(s.reps!=null?' × '+s.reps:'')
+  :(s.weight!=null?s.weight+' kg'+(s.reps!=null?' × '+s.reps:''):(s.reps!=null?s.reps+' reps':'★'));
+document.getElementById('pr-count').textContent=`${prs.length} personal records across ${blockIds.length} block${blockIds.length===1?'':'s'}.`;
+document.getElementById('prboard').innerHTML=prs.map(s=>
+  `<div class="prcard"><div class="ex">${esc(s.exercise)}</div><div class="v num">${esc(fmtVal(s))}</div>
+    <div class="m">${fmtL(s.t)} · ${esc(s.day)}${s.variation?' · '+esc(s.variation):''}</div></div>`).join('');
 
 document.getElementById('footer').innerHTML=
-  `Digitized from handwritten Push/Pull/Legs logs — ${V.length} sets, 2 blocks. Weights are kg except machine <em>levels</em> (Leg curl) and band-assisted bodyweight moves (Pull-ups, Dips, shown as reps). Est. 1RM via Epley (w·(1+reps/30)). ★ = personal record; crossed-out sets excluded. Source photos &amp; raw data kept privately.`;
+  `Digitized from handwritten Push/Pull/Legs logs — ${V.length} sets, ${blockIds.length} block${blockIds.length===1?'':'s'}. Weights are kg except machine <em>levels</em> (Leg curl) and band-assisted bodyweight moves (Pull-ups, Dips, shown as reps). Est. 1RM via Epley (w·(1+reps/30)). ★ = personal record; crossed-out sets excluded. Source photos &amp; raw data kept privately.`;
 
 // theme toggle
 function theme(name){document.documentElement.setAttribute('data-theme',name);
