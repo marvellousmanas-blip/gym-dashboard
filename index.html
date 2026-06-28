@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#0f1115">
+<title>Gym Logs · Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1115; --card:#181b22; --card2:#1f232c; --line:#2a2f3a;
+    --txt:#e6e9ef; --mut:#9aa3b2; --accent:#5b8cff;
+    --push:#ff6b6b; --pull:#4dabf7; --legs:#51cf66; --gold:#ffd43b;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--txt);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
+  .wrap{max-width:1040px;margin:0 auto;padding:18px 14px 60px}
+  header h1{margin:0;font-size:1.5rem;letter-spacing:.2px}
+  header p{margin:4px 0 0;color:var(--mut);font-size:.9rem}
+  h2{font-size:1.02rem;margin:0 0 12px;font-weight:600}
+  .sub{color:var(--mut);font-weight:400;font-size:.82rem}
+  .grid{display:grid;gap:12px}
+  .stats{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin:18px 0 22px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+  .stat .n{font-size:1.55rem;font-weight:700;line-height:1.1}
+  .stat .l{color:var(--mut);font-size:.78rem;margin-top:3px}
+  .stat .s{color:var(--mut);font-size:.7rem;margin-top:2px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:14px}
+  .canvas-box{position:relative;width:100%;height:300px}
+  @media(max-width:560px){.canvas-box{height:260px}}
+  .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .row.between{justify-content:space-between}
+  select{background:var(--card2);color:var(--txt);border:1px solid var(--line);
+    border-radius:10px;padding:9px 12px;font-size:.92rem;max-width:100%}
+  .pill{display:inline-flex;align-items:center;gap:6px;background:var(--card2);
+    border:1px solid var(--line);border-radius:999px;padding:5px 10px;font-size:.74rem;color:var(--mut)}
+  .dot{width:9px;height:9px;border-radius:50%}
+  .mini{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:10px;margin-top:14px}
+  .mini div{background:var(--card2);border-radius:10px;padding:9px 10px}
+  .mini .n{font-weight:700;font-size:1.05rem}
+  .mini .l{color:var(--mut);font-size:.7rem}
+  .prlist{max-height:340px;overflow:auto;margin:-4px -4px 0}
+  .pr{display:flex;justify-content:space-between;gap:10px;padding:9px 10px;border-bottom:1px solid var(--line);font-size:.86rem}
+  .pr:last-child{border-bottom:0}
+  .pr .ex{font-weight:600}
+  .pr .meta{color:var(--mut);font-size:.76rem}
+  .pr .val{color:var(--gold);font-weight:700;white-space:nowrap}
+  .legendrow{gap:6px 14px;margin-bottom:10px}
+  footer{color:var(--mut);font-size:.76rem;line-height:1.6;margin-top:24px}
+  footer a{color:var(--accent);text-decoration:none}
+  code{background:var(--card2);padding:1px 5px;border-radius:5px;font-size:.78rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🏋️ Gym Logs</h1>
+    <p id="hdr-range">Push / Pull / Legs training log</p>
+  </header>
+
+  <div class="grid stats" id="stats"></div>
+
+  <div class="card">
+    <h2>Training frequency <span class="sub">— workouts per week, by type</span></h2>
+    <div class="row legendrow" id="freq-legend"></div>
+    <div class="canvas-box"><canvas id="freqChart"></canvas></div>
+    <div class="mini" id="freq-mini"></div>
+  </div>
+
+  <div class="card">
+    <h2>Weekly volume <span class="sub">— Σ&nbsp;weight×reps for kg-loaded lifts</span></h2>
+    <div class="canvas-box"><canvas id="volChart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2>Strength progression <span class="sub">— heaviest set per session (kg)</span></h2>
+    <div class="row legendrow" id="str-legend"></div>
+    <div class="canvas-box"><canvas id="strChart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2>Exercise explorer</h2>
+    <div class="row between">
+      <select id="exSelect"></select>
+      <span class="pill" id="exUnit"></span>
+    </div>
+    <div class="canvas-box" style="margin-top:12px"><canvas id="exChart"></canvas></div>
+    <div class="mini" id="exMini"></div>
+  </div>
+
+  <div class="card">
+    <h2>Personal records <span class="sub">— ★ marked on the sheet</span></h2>
+    <div class="prlist" id="prlist"></div>
+  </div>
+
+  <footer id="footer"></footer>
+</div>
+
+<script src="gym_data.js"></script>
+<script>
+const D = window.GYM_DATA;
+const DAYS=['push','pull','legs'];
+const DAYCOL={push:'#ff6b6b',pull:'#4dabf7',legs:'#51cf66'};
+const css=k=>getComputedStyle(document.documentElement).getPropertyValue(k).trim();
+Chart.defaults.color=css('--mut');
+Chart.defaults.font.family='system-ui,sans-serif';
+Chart.defaults.borderColor=css('--line');
+Chart.defaults.plugins.legend.display=false;
+Chart.defaults.maintainAspectRatio=false;
+
+// ---- flatten ----
+const sets=[];
+D.blocks.forEach(b=>DAYS.forEach(day=>{
+  const ds=b.days[day]; if(!ds)return;
+  ds.exercises.forEach(e=>e.sessions.forEach(s=>s.sets.forEach(st=>{
+    sets.push({block:b.block,day,exercise:e.name,canon:e.canonical||e.name,load:e.load_type||'kg',
+      date:s.date_iso,t:Date.parse(s.date_iso),weight:st.weight,reps:st.reps,
+      pr:!!st.pr,voided:!!st.voided,variation:s.variation||''});
+  })));
+}));
+const V=sets.filter(s=>!s.voided);
+const allDates=[...new Set(V.map(s=>s.date))].sort();
+const minT=Date.parse(allDates[0]), maxT=Date.parse(allDates[allDates.length-1]);
+const fmt=t=>{const d=new Date(t);return d.getDate()+'/'+(d.getMonth()+1)};
+const fmtFull=t=>{const d=new Date(t);return d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})};
+
+// ---- summary stats ----
+const workouts=new Set(V.map(s=>s.date+'|'+s.day)).size;
+const trainingDays=new Set(V.map(s=>s.date)).size;
+const totalReps=V.reduce((a,s)=>a+(s.reps||0),0);
+const volume=V.filter(s=>s.load==='kg'&&s.weight&&s.reps).reduce((a,s)=>a+s.weight*s.reps,0);
+const prCount=V.filter(s=>s.pr).length;
+const stats=[
+  {n:trainingDays,l:'Training days',s:fmtFull(minT)+' → '+fmtFull(maxT)},
+  {n:workouts,l:'Workouts logged',s:'across 2 blocks'},
+  {n:V.length,l:'Sets',s:totalReps.toLocaleString()+' total reps'},
+  {n:Math.round(volume/1000)+'t',l:'Volume lifted',s:Math.round(volume).toLocaleString()+' kg (kg-lifts)'},
+  {n:prCount,l:'PRs hit ★',s:''},
+  {n:new Set(V.map(s=>s.canon)).size,l:'Exercises',s:''},
+];
+document.getElementById('stats').innerHTML=stats.map(s=>
+  `<div class="stat"><div class="n">${s.n}</div><div class="l">${s.l}</div>${s.s?`<div class="s">${s.s}</div>`:''}</div>`).join('');
+document.getElementById('hdr-range').textContent=
+  `Push / Pull / Legs · ${fmtFull(minT)} – ${fmtFull(maxT)}`;
+
+// ---- week buckets (Monday), filling gaps ----
+function monday(t){const d=new Date(t);const wd=(d.getDay()+6)%7;d.setDate(d.getDate()-wd);d.setHours(0,0,0,0);return d.getTime();}
+const w0=monday(minT), w1=monday(maxT), WEEK=6048e5;
+const weeks=[];for(let w=w0;w<=w1;w+=WEEK)weeks.push(w);
+const weekLabels=weeks.map(fmt);
+// frequency: distinct (date,day) per week per type
+const freq={push:[],pull:[],legs:[]};
+const volByWeek=weeks.map(()=>0);
+weeks.forEach((w,i)=>{
+  const inWk=s=>s.t>=w&&s.t<w+WEEK;
+  DAYS.forEach(day=>{
+    freq[day][i]=new Set(V.filter(s=>inWk(s)&&s.day===day).map(s=>s.date)).size;
+  });
+  volByWeek[i]=V.filter(s=>inWk(s)&&s.load==='kg'&&s.weight&&s.reps).reduce((a,s)=>a+s.weight*s.reps,0);
+});
+// freq legend + mini totals
+document.getElementById('freq-legend').innerHTML=DAYS.map(d=>
+  `<span class="pill"><span class="dot" style="background:${DAYCOL[d]}"></span>${d}</span>`).join('');
+const cnt=d=>new Set(V.filter(s=>s.day===d).map(s=>s.date)).size;
+document.getElementById('freq-mini').innerHTML=DAYS.map(d=>
+  `<div><div class="n" style="color:${DAYCOL[d]}">${cnt(d)}</div><div class="l">${d} days</div></div>`).join('')+
+  `<div><div class="n">${(workouts/weeks.filter((_,i)=>freq.push[i]+freq.pull[i]+freq.legs[i]>0).length).toFixed(1)}</div><div class="l">avg / active wk</div></div>`;
+
+new Chart(freqChart,{type:'bar',data:{labels:weekLabels,
+  datasets:DAYS.map(d=>({label:d,data:freq[d],backgroundColor:DAYCOL[d],stack:'a',borderRadius:3}))},
+  options:{scales:{x:{stacked:true,grid:{display:false},ticks:{maxRotation:0,autoSkip:true,maxTicksLimit:9}},
+    y:{stacked:true,beginAtZero:true,ticks:{precision:0},grid:{color:css('--line')}}},
+    plugins:{tooltip:{callbacks:{title:i=>'Week of '+i[0].label}}}}});
+
+new Chart(volChart,{type:'bar',data:{labels:weekLabels,
+  datasets:[{data:volByWeek.map(v=>Math.round(v)),backgroundColor:css('--accent'),borderRadius:3}]},
+  options:{scales:{x:{grid:{display:false},ticks:{maxRotation:0,autoSkip:true,maxTicksLimit:9}},
+    y:{beginAtZero:true,grid:{color:css('--line')},ticks:{callback:v=>v>=1000?(v/1000)+'k':v}}},
+    plugins:{tooltip:{callbacks:{title:i=>'Week of '+i[0].label,label:c=>c.parsed.y.toLocaleString()+' kg'}}}}});
+
+// ---- strength progression ----
+const xT=t=>(t-minT)/864e5;
+const STR=[
+  {key:'Deadlift',color:'#ff6b6b',f:s=>s.exercise==='Deadlift'},
+  {key:'Squat',color:'#4dabf7',f:s=>s.canon==='Squat'},
+  {key:'RDL',color:'#51cf66',f:s=>s.exercise==='RDL'},
+  {key:'Bench',color:'#ffd43b',f:s=>s.exercise==='Chest Press'&&/Flat|Free/i.test(s.variation)},
+  {key:'Shoulder Press',color:'#cc5de8',f:s=>s.exercise==='Shoulder Press'},
+];
+function topBySession(filter){
+  const m={};V.filter(s=>filter(s)&&s.weight!=null).forEach(s=>{m[s.date]=Math.max(m[s.date]||0,s.weight);});
+  return Object.keys(m).sort().map(d=>({x:xT(Date.parse(d)),y:m[d]}));
+}
+const strDatasets=STR.map(L=>({label:L.key,data:topBySession(L.f),borderColor:L.color,
+  backgroundColor:L.color,tension:.25,spanGaps:true,pointRadius:3,pointHoverRadius:5,borderWidth:2}))
+  .filter(d=>d.data.length);
+document.getElementById('str-legend').innerHTML=STR.filter(L=>topBySession(L.f).length).map(L=>
+  `<span class="pill" data-k="${L.key}"><span class="dot" style="background:${L.color}"></span>${L.key}</span>`).join('');
+const strChartObj=new Chart(strChart,{type:'line',data:{datasets:strDatasets},
+  options:{parsing:false,scales:{
+    x:{type:'linear',min:0,max:xT(maxT),grid:{color:css('--line')},
+       ticks:{maxTicksLimit:8,callback:v=>fmt(minT+v*864e5)}},
+    y:{grid:{color:css('--line')},title:{display:true,text:'kg (top set)'}}},
+    plugins:{tooltip:{callbacks:{title:i=>fmtFull(minT+i[0].parsed.x*864e5),label:c=>c.dataset.label+': '+c.parsed.y+' kg'}}}}});
+// tap legend pills to toggle
+document.querySelectorAll('#str-legend .pill').forEach(p=>{p.style.cursor='pointer';
+  p.onclick=()=>{const di=strChartObj.data.datasets.findIndex(d=>d.label===p.dataset.k);
+    const meta=strChartObj.getDatasetMeta(di);meta.hidden=!meta.hidden;p.style.opacity=meta.hidden?.4:1;strChartObj.update();};});
+
+// ---- exercise explorer ----
+const canon=[...new Set(V.map(s=>s.canon))].sort();
+const sel=document.getElementById('exSelect');
+sel.innerHTML=canon.map(c=>`<option>${c}</option>`).join('');
+let exObj;
+function drawEx(name){
+  const rows=V.filter(s=>s.canon===name);
+  const load=rows[0].load;
+  const useReps=load==='band';
+  const unit=load==='band'?'reps (assisted)':load==='machine_level'?'machine level':'kg';
+  document.getElementById('exUnit').textContent=load==='band'?'band-assisted · best reps':
+    load==='machine_level'?'machine levels':'kg · top set';
+  const m={};rows.forEach(s=>{const v=useReps?s.reps:s.weight;if(v==null)return;m[s.date]=Math.max(m[s.date]||0,v);});
+  const pts=Object.keys(m).sort().map(d=>({x:xT(Date.parse(d)),y:m[d]}));
+  const best=rows.reduce((a,s)=>{const v=useReps?s.reps:s.weight;return v!=null&&v>(a.v??-1)?{v,s}:a;},{}).s;
+  const data={datasets:[{label:name,data:pts,borderColor:css('--accent'),backgroundColor:css('--accent'),
+    tension:.25,spanGaps:true,pointRadius:3,pointHoverRadius:5,borderWidth:2}]};
+  const opts={parsing:false,scales:{
+    x:{type:'linear',min:0,max:xT(maxT),grid:{color:css('--line')},ticks:{maxTicksLimit:8,callback:v=>fmt(minT+v*864e5)}},
+    y:{grid:{color:css('--line')},title:{display:true,text:unit}}},
+    plugins:{tooltip:{callbacks:{title:i=>fmtFull(minT+i[0].parsed.x*864e5),
+      label:c=>c.parsed.y+' '+(useReps?'reps':unit)}}}};
+  if(exObj){exObj.data=data;exObj.options=opts;exObj.update();}
+  else exObj=new Chart(exChart,{type:'line',data,options:opts});
+  const sess=new Set(rows.map(s=>s.date)).size;
+  const bestTxt=best?(useReps?best.reps+' reps':best.weight+' kg'+(best.reps?' × '+best.reps:'')):'—';
+  document.getElementById('exMini').innerHTML=
+    `<div><div class="n">${sess}</div><div class="l">sessions</div></div>`+
+    `<div><div class="n">${rows.length}</div><div class="l">sets</div></div>`+
+    `<div><div class="n">${bestTxt}</div><div class="l">best set</div></div>`+
+    `<div><div class="n">${rows.filter(s=>s.pr).length}</div><div class="l">PRs</div></div>`;
+}
+sel.onchange=()=>drawEx(sel.value);
+drawEx(canon.includes('Deadlift')?'Deadlift':canon[0]);
+sel.value=canon.includes('Deadlift')?'Deadlift':canon[0];
+
+// ---- PR list ----
+const prs=V.filter(s=>s.pr).sort((a,b)=>b.t-a.t||a.exercise.localeCompare(b.exercise));
+document.getElementById('prlist').innerHTML=prs.map(s=>{
+  const val=s.weight!=null?(s.weight+' kg'+(s.reps!=null?' × '+s.reps:'')):(s.reps!=null?s.reps+' reps':'★');
+  return `<div class="pr"><div><div class="ex">${s.exercise}</div>
+    <div class="meta">${fmtFull(s.t)} · ${s.day}${s.variation?' · '+s.variation:''}</div></div>
+    <div class="val">${val}</div></div>`;}).join('');
+
+// ---- footer ----
+document.getElementById('footer').innerHTML=`<b>About:</b> Digitized from handwritten Push/Pull/Legs training logs (${V.length} sets, 2 blocks). Weights are kg except machine <em>levels</em> (e.g. Leg curl) and band-assisted bodyweight moves (Pull-ups, Dips — shown as reps). ★ = personal record. Source photos &amp; raw data kept privately.`;
+</script>
+</body>
+</html>
